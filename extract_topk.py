@@ -563,7 +563,7 @@ def write_top_seqs(scores, outfile_name, n_flank=0, f_flank=0, left_flank="", ri
 def process(fastq, out, dinucl=False, sample=0, k=4,
             alpha=0.95, beta=0.99, n_flank=0, f_flank=0,
             left_flank="", right_flank="", invert=True,
-            chart, chart_title, verbose=False):
+            chart=None, chart_title=None, verbose=False):
     if chart is not None:
         if plt is None:
             raise ImportError("Module 'matplotlib' failed to import")
