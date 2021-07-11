@@ -81,6 +81,11 @@ def openfile(filename, mode="rt", *args, expanduser=False, expandvars=False,
     return _open(filename, mode, *args, **kwargs)
 
 
+####################
+# CONSTANTS
+####################
+
+
 COMP = {"A": "T",
         "C": "G",
         "G": "C",
@@ -90,6 +95,11 @@ CODE = {"A": 0,
         "G": 2,
         "T": 3}
 UNCODE = {v: k for k, v in CODE.items()}
+
+
+####################
+# GETTING SEQ-S
+####################
 
 
 def calc_cpm(x):
@@ -108,6 +118,17 @@ def get_nr(fastq_file, sample=0, verbose=False):
     if verbose:
         sys.stderr.write(f"Extracted {len(unique)} non-redundant sequences; {len(nonunique)} non-unique sequences\n")
     return cpm, nonunique, unique
+
+
+####################
+# SHUFFLING SEQ-S
+####################
+
+
+def shuffle_string(s):
+    chars = list(s)
+    np.random.shuffle(chars)
+    return "".join(chars)
 
 
 def compute_count(s):
@@ -207,7 +228,7 @@ def shuffle_edge_list(lst):
     return lst
 
 
-def shuffle_string(s):
+def shuffle_string_dinucl(s):
     # P. Clote, Oct 2003
     ok = False
     while not ok:
@@ -232,6 +253,11 @@ def shuffle_string(s):
         prev_char = char
     lst.append(s[-1])
     return "".join(lst)
+
+
+####################
+# SEQ-S OPERATIONS
+####################
 
 
 def revcomp(seq):
@@ -266,11 +292,18 @@ def invert_kmers(data, kdict, df=True):
     for kmer in kdict:
         if kdict[kmer]:
             rc = revcomp(kmer)
-            if kmer == rc:
-                new_data[kmer] = data[kmer]
-                continue
             new_data[kmer] = data[kmer] + data[rc]
+            new_data[rc] = new_data[kmer] 
     return new_data
+
+
+def encode(kmer):
+    k = len(kmer)
+    code = 0
+    for i in range(0, k, 1):
+        itercode = CODE[kmer[i]]
+        code = (code << 2) + itercode
+    return code
 
 
 def uncode(code, k=4):
@@ -283,38 +316,41 @@ def uncode(code, k=4):
     return "".join(kmer)
 
 
-def make_kmer_df(unique_seqs, k=4, sort=True, compress=False, verbose=False):
+####################
+# K-MER COUNTING
+####################
+
+
+def make_kmer_vect(unique_seqs, k=4, return_kmer_df=False):
     letters = np.array(unique_seqs.apply(lambda x: [CODE[sym] for sym in x]).tolist())
     cp = letters.copy()
     for roll in range(1, k):
         letters = (letters << 2) + np.roll(cp, -roll, axis=1)
     
     letters = pd.DataFrame(letters[:,:-k + 1], index=unique_seqs)
-    if compress:
-        letters = letters.melt().groupby(by="value").count().squeeze()
-        letters.rename(lambda x: uncode(x, k), inplace=True)
+    mx = letters.melt().groupby(by="value").count().squeeze()
+    mx.rename(lambda x: uncode(x, k), inplace=True)
+    if return_kmer_df:
+        return mx, letters
     else:
-        letters.reset_index(inplace=True)
-        try:
-            letters = letters.melt(id_vars=["index"]).groupby(sort=sort, by=["index", "value"])\
-            .count().unstack(-1, fill_value=0)["variable"]
-        except ValueError:
-            if verbose:
-                sys.stderr.write(f"Processed data are too big! Calculating in parts...\n")
-            parts = []
-            quant = 10000
-            for i in range(0, letters.shape[0], quant):
-                parts.append(letters.iloc[i:i + quant].melt(id_vars=["index"]).groupby(sort=sort, by=["index", "value"])\
-                             .count().unstack(-1, fill_value=0)["variable"])
-            letters = pd.concat(parts, copy=False).fillna(0).astype("int8")
-                
-        
-        letters.rename(columns=lambda x: uncode(x, k), inplace=True)
-        letters.index.name = None
-    return letters
+        return mx
 
 
-def calc_kmers(non_unique_seqs, unique_seqs, ref_kmers=None, k=4, invert=True, verbose=False):
+def calc_kmer_scores(kmer_code_df, kmer_scores, verbose=False):
+    # attention: `kmer_code_df` is mutated!
+    kmer_code_df.rename_axis("seq", axis=0, inplace=True)
+    kmer_code_df.reset_index(inplace=True)
+    kmer_scores = kmer_scores.rename(index=encode)
+    
+    codes = kmer_code_df.melt(id_vars=["seq"], var_name="position", value_name="kmer")
+    codes.drop(labels=["position"], axis=1, inplace=True)
+    codes["kmer"] = codes["kmer"].map(kmer_scores)
+    scores = codes.groupby(by=["seq"])["kmer"].sum()
+    
+    return scores
+
+
+def calc_kmers(non_unique_seqs, unique_seqs, k=4, dinucl=False, invert=True, verbose=False):
     if verbose:
         sys.stderr.write(f"Started analyzing {len(unique_seqs)} sequences\n")
 
@@ -329,33 +365,32 @@ def calc_kmers(non_unique_seqs, unique_seqs, ref_kmers=None, k=4, invert=True, v
         sys.stderr.write(f"Generated {len(kmers_list)} {k}-mers\n")
 
     experiment = unique_seqs
-    
-    if ref_kmers is not None:
-        m0 = ref_kmers
+
+    if dinucl:
+        control = unique_seqs.apply(shuffle_string_dinucl)
     else:
-        control = non_unique_seqs.apply(shuffle_string)
-        if verbose:
-            sys.stderr.write("Control generated\n")
-        m0 = make_kmer_df(control, k=k, compress=True).reindex(kmers_list, fill_value=0)
-        if verbose:
-            sys.stderr.write(f"Counted {k}-mers for control\n")
+        control = unique_seqs.apply(shuffle_string)
+    if verbose:
+        sys.stderr.write("Control generated\n")
+    
+    m0 = make_kmer_vect(control, k=k, return_kmer_df=False).reindex(kmers_list, fill_value=0)
+    if verbose:
+        sys.stderr.write(f"Counted {k}-mers for control\n")
     if invert:
         m0 = invert_kmers(m0, kdict, df=False)
     
-    uniq_exp_mx = make_kmer_df(experiment, k=k, sort=False, compress=False, verbose=verbose).reindex(kmers_list, axis="columns", fill_value=0)
-    if invert:
-        uniq_exp_mx = invert_kmers(uniq_exp_mx, kdict, df=True)
-    exp_mx = uniq_exp_mx.reindex(non_unique_seqs)
-    m1 = exp_mx.sum(axis=0)
+    m1, exp_kmer_df = make_kmer_vect(experiment, k=k, return_kmer_df=True)
+    m1 = m1.reindex(kmers_list, fill_value=0)
     if verbose:
         sys.stderr.write(f"Counted {k}-mers for experiment\n")
+    if invert:
+        m1 = invert_kmers(m1, kdict, df=False)
 
     m0 /= m0.sum()
     m1 /= m1.sum()
 
-    c1 = np.log10((m1 / m0).fillna(0))
-
-    x1 = (uniq_exp_mx * c1).sum(axis=1)
+    c1 = np.log10((m1 / m0).fillna(1))
+    x1 = calc_kmer_scores(exp_kmer_df, c1)
 
     if verbose:
         sys.stderr.write(f"Scored sequences\n")
@@ -363,19 +398,9 @@ def calc_kmers(non_unique_seqs, unique_seqs, ref_kmers=None, k=4, invert=True, v
     return x1, c1
 
 
-def get_bg_kmers(k=4, bgfile=None, shuffle=False, verbose=False):
-    if bgfile is None:
-        return None
-    with openfile(bgfile) as handle:
-        json_dict = json.load(handle)
-    new_k = int(json_dict["k"])
-    if k != new_k:
-        raise ValueError(f"{k}-mer background file contains {new_k}-mers")
-    if verbose:
-        sys.stderr.write(f"Background JSON read\n")
-    if shuffle:
-        return pd.Series(json_dict["m0"]).astype(int)
-    return pd.Series(json_dict["m1"]).astype(int)
+####################
+# FILTERING RESULTS
+####################
 
 
 def quantile_slice(alpha, beta, cpm, scores, verbose=False):
@@ -425,6 +450,11 @@ def split_by_beta(beta, scores_enr, scores_etc, verbose=False):
     if verbose:
         sys.stderr.write(f"Beta = {beta}; chosen top {choice.shape[0]} sequences by k-mer score\n")
     return choice
+
+
+####################
+# STATS AND CHARTS
+####################
 
 
 def calc_statistics(choice, scores_enr, scores_etc, fc=True, ks=True, u=True, medians=True, verbose=False):
@@ -493,6 +523,11 @@ def trace_chart(cpm, scores, scores_enr, scores_etc, path, title, thres_score=No
     return chart
 
 
+####################
+# WRITING RESULTS
+####################
+
+
 def get_f_flanks(f=0, left_flank="", right_flank=""):
     if f == 0:
         return "", ""
@@ -520,17 +555,22 @@ def write_top_seqs(scores, outfile_name, n_flank=0, f_flank=0, left_flank="", ri
         sys.stderr.write(f"Best {top.shape[0]} sequences written\n")
 
 
-def process(fastq, out, chart, chart_title, bgfile=None, shuffle=False,
-            sample=0, k=4, alpha=0.95, beta=0.99, n_flank=0, f_flank=0,
-            left_flank="", right_flank="", invert=True, verbose=False):
+####################
+# AGGREGATED FUNC
+####################
+
+
+def process(fastq, out, dinucl=False, sample=0, k=4,
+            alpha=0.95, beta=0.99, n_flank=0, f_flank=0,
+            left_flank="", right_flank="", invert=True,
+            chart, chart_title, verbose=False):
     if chart is not None:
         if plt is None:
             raise ImportError("Module 'matplotlib' failed to import")
         elif sns is None:
             raise ImportError("Module 'seaborn' failed to import")
     cpm, allseqs, unique = get_nr(fastq, sample=sample, verbose=verbose)
-    ref_kmers = get_bg_kmers(k=k, bgfile=bgfile, shuffle=shuffle, verbose=verbose)
-    scores, kmers = calc_kmers(allseqs, unique, ref_kmers, k=k, invert=invert, verbose=verbose)
+    scores, kmers = calc_kmers(allseqs, unique, k=k, dinucl=dinucl, invert=invert, verbose=verbose)
     scores_enr, scores_etc, scores_top = quantile_slice(alpha, beta, cpm, scores, verbose)
     if chart is not None:
         thres_score = scores_top.min()
@@ -539,6 +579,11 @@ def process(fastq, out, chart, chart_title, bgfile=None, shuffle=False,
     
     if verbose:
         sys.stderr.write("Done!\n\n")
+
+
+####################
+# LAUNCHING SCRIPT
+####################
 
 
 if __name__ == "__main__":
@@ -563,17 +608,15 @@ The script does NOT support ambiguous IUPAC codes (ATGC only)."""
     
     parser.add_argument("--fastq", default="-", metavar="fastq", help="input fastq file (default: stdin)")
     parser.add_argument("--out", default="-", metavar="fasta", help="output fasta file (default: stdout)")
-    parser.add_argument("--bgfile", default=None, metavar="json", help="input background enrichment file (if not specified, will be generated by shuffling)")
-    parser.add_argument("-s", "--shuffle", help="use shuffled background k-mer frequencies", action="store_true")
-    parser.add_argument("--chart", default=None, metavar="svg/png/etc", help="trace an enrichment-relevance chart (optional)")
-    parser.add_argument("--title", default=None, metavar="TITLE", help="use custom title for the chart (used only when the parameter --chart is specified)")
+    parser.add_argument("-d", "--dinucl", help="use dinucleotide shuffling instead of mononucleotide", action="store_true")
     parser.add_argument("--sample", default=0, metavar="N", type=int, help="number of sequence subset to analyze (default: 0 [no sampling])")
+
     parser.add_argument("-k", default=4, metavar="K", type=int, help="length of a k-mer (default: 4)")
     parser.add_argument("-a", "--alpha", default=100000, metavar="P", type=float, help="quantile level of 'baseline' sequences [0 to 1) or the number of "\
                         "non-baseline sequences (1, 2, ...) (default: 100'000). 'Single-hit' sequences are always excluded.")
     parser.add_argument("-b", "--beta", default=0.99, metavar="P", type=float, help="threshold 'baseline' level for 'non-baseline' [0 to 1) or the number "\
                         "of non-baseline sequences (1, 2, ...) (default: 0.99)")
-    
+
     parser.add_argument("-n", default=0, metavar="N", type=int, help="length of N-flank to be added (default: 0)")
     parser.add_argument("-f", default=-1, metavar="F", type=int, help="length of non-N-flank to be added. "\
                         "If either prefix or suffix are shorter than F, N-flanks are extended to match the length. "\
@@ -582,9 +625,12 @@ The script does NOT support ambiguous IUPAC codes (ATGC only)."""
                         "Only the last F letters are prepended to the output, unless F is not -1.")
     parser.add_argument("--suffix", default="", metavar="sequence", help="suffix sequence. "\
                         "Only the first F letters are appended to the output, unless F is not -1.")
-    
+
     parser.add_argument("-i", "--noinvert", help="don't summarize counts of the reverse-complement k-mers in the score", action="store_false")
-    
+
+    parser.add_argument("--chart", default=None, metavar="svg/png/etc", help="trace an enrichment-relevance chart (optional)")
+    parser.add_argument("--title", default=None, metavar="TITLE", help="use custom title for the chart (used only when the parameter --chart is specified)")
+
     parser.add_argument("--seed", default=13, metavar="SEED", type=int, help="seed for RNG (default: 13)")
     parser.add_argument("-v", "--verbose", help="verbose output", action="store_true")
     
@@ -594,8 +640,7 @@ The script does NOT support ambiguous IUPAC codes (ATGC only)."""
     
     process(fastq=args.fastq,
             out=args.out,
-            bgfile=args.bgfile,
-            shuffle=args.shuffle,
+            dinucl=args.dinucl,
             sample=args.sample,
             chart=args.chart,
             chart_title=args.title,
