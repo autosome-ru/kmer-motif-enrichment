@@ -29,7 +29,7 @@ Arguments:
   --fastq fastq        input fastq file (default: stdin)
   --out fasta          output fasta file (default: stdout)
   -d, --dinucl         use dinucleotide shuffling instead of mononucleotide
-  --sample N           number of sequence subset to analyze (default: 0 [no sampling])
+  --sample N           size of sequence subset to analyze (default: 0 [no sampling])
   -k K                 length of a k-mer (default: 4)
   -a P, --alpha P      quantile level of 'baseline' sequences [0 to 1) or the number
                        of non-baseline sequences (1, 2, ...) (default: 100'000).
