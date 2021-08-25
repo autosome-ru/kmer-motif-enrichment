@@ -24,6 +24,7 @@ try:
 except ImportError:
     sns = None
 
+from functools import reduce
 from itertools import product
 
 from Bio import SeqIO
@@ -292,6 +293,8 @@ def invert_kmers(data, kdict, df=True):
     for kmer in kdict:
         if kdict[kmer]:
             rc = revcomp(kmer)
+            # palindromes are counted twice
+            # because they occur on both strains
             new_data[kmer] = data[kmer] + data[rc]
             new_data[rc] = new_data[kmer] 
     return new_data
@@ -350,7 +353,7 @@ def calc_kmer_scores(kmer_code_df, kmer_scores, verbose=False):
     return scores
 
 
-def calc_kmers(non_unique_seqs, unique_seqs, k=4, dinucl=False, invert=True, verbose=False):
+def calc_kmers(unique_seqs, k=4, dinucl=False, invert=True, verbose=False):
     if verbose:
         sys.stderr.write(f"Started analyzing {len(unique_seqs)} sequences\n")
 
@@ -386,6 +389,15 @@ def calc_kmers(non_unique_seqs, unique_seqs, k=4, dinucl=False, invert=True, ver
     if invert:
         m1 = invert_kmers(m1, kdict, df=False)
 
+    return m0, m1, exp_kmer_df
+
+
+def calc_kmers_singlelen(unique_seqs, k=4, dinucl=False, invert=True, verbose=False):
+    uniq_lengths = unique_seqs.str.len().unique().shape[0]
+    assert uniq_lengths == 1, f"Sequence length is not uniform ({uniq_lengths} different lengths)"
+
+    m0, m1, exp_kmer_df = calc_kmers(unique_seqs=unique_seqs, k=k, dinucl=dinucl, invert=invert, verbose=verbose)
+
     m0 /= m0.sum()
     m1 /= m1.sum()
 
@@ -394,6 +406,45 @@ def calc_kmers(non_unique_seqs, unique_seqs, k=4, dinucl=False, invert=True, ver
 
     if verbose:
         sys.stderr.write(f"Scored sequences\n")
+
+    return x1, c1
+
+
+def calc_kmers_multilen(unique_seqs, k=4, dinucl=False, invert=True, verbose=False):
+    lengths = unique_seqs.str.len()
+
+    m0s = list()
+    m1s = list()
+    kmer_dfs = list()
+    for lgth, unique_group in unique_seqs.groupby(sort=True, by=lengths):
+        m0_group, m1_group, exp_kmer_df = calc_kmers(unique_seqs=unique_group, k=k, dinucl=dinucl, invert=invert, verbose=False)
+        m0s.append(m0_group)
+        m1s.append(m1_group)
+        kmer_dfs.append(exp_kmer_df)
+        if verbose:
+            sys.stderr.write(f"Scored sequences with length = {lgth}\n")
+
+    m0 = reduce(lambda x, y: x.add(y, fill_value=0), m0s)
+    m1 = reduce(lambda x, y: x.add(y, fill_value=0), m1s)
+
+    m0 /= m0.sum()
+    m1 /= m1.sum()
+
+    c1 = np.log10((m1 / m0).fillna(1))
+
+    x1s = list()
+    for exp_kmer_df in kmer_dfs:
+        x1_group = calc_kmer_scores(exp_kmer_df, c1)
+        x1s.append(x1_group)
+
+    x1 = reduce(lambda x, y: x.add(y, fill_value=0.0), x1s)
+    x1 = x1.reindex(unique_seqs)
+    lengths.index = unique_seqs
+    
+    x1 = x1 * lengths.mean() / lengths
+
+    if verbose:
+        sys.stderr.write(f"Scored all sequences\n")
 
     return x1, c1
 
@@ -560,17 +611,21 @@ def write_top_seqs(scores, outfile_name, n_flank=0, f_flank=0, left_flank="", ri
 ####################
 
 
-def process(fastq, out, dinucl=False, sample=0, k=4,
-            alpha=0.95, beta=0.99, n_flank=0, f_flank=0,
-            left_flank="", right_flank="", invert=True,
-            chart=None, chart_title=None, verbose=False):
+def process(fastq, out, multilen=True, dinucl=False,
+            sample=0, k=4, alpha=0.95, beta=0.99,
+            n_flank=0, f_flank=0, left_flank="", right_flank="",
+            invert=True, chart=None, chart_title=None,
+            verbose=False):
     if chart is not None:
         if plt is None:
             raise ImportError("Module 'matplotlib' failed to import")
         elif sns is None:
             raise ImportError("Module 'seaborn' failed to import")
     cpm, allseqs, unique = get_nr(fastq, sample=sample, verbose=verbose)
-    scores, kmers = calc_kmers(allseqs, unique, k=k, dinucl=dinucl, invert=invert, verbose=verbose)
+    if multilen:
+        scores, kmers = calc_kmers_multilen(unique, k=k, dinucl=dinucl, invert=invert, verbose=verbose)
+    else:
+        scores, kmers = calc_kmers_singlelen(unique, k=k, dinucl=dinucl, invert=invert, verbose=verbose)
     scores_enr, scores_etc, scores_top = quantile_slice(alpha, beta, cpm, scores, verbose)
     if chart is not None:
         thres_score = scores_top.min()
@@ -608,6 +663,7 @@ The script does NOT support ambiguous IUPAC codes (ATGC only)."""
     
     parser.add_argument("--fastq", default="-", metavar="fastq", help="input fastq file (default: stdin)")
     parser.add_argument("--out", default="-", metavar="fasta", help="output fasta file (default: stdout)")
+    parser.add_argument("-m", "--multilen", help="account for different sequence lengths in input", action="store_true")
     parser.add_argument("-d", "--dinucl", help="use dinucleotide shuffling instead of mononucleotide", action="store_true")
     parser.add_argument("--sample", default=0, metavar="N", type=int, help="number of sequence subset to analyze (default: 0 [no sampling])")
 
@@ -640,6 +696,7 @@ The script does NOT support ambiguous IUPAC codes (ATGC only)."""
     
     process(fastq=args.fastq,
             out=args.out,
+            multilen=args.multilen,
             dinucl=args.dinucl,
             sample=args.sample,
             chart=args.chart,
