@@ -30,7 +30,6 @@ from itertools import product
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
-from Bio.Alphabet import DNAAlphabet
 
 
 try:
@@ -109,7 +108,7 @@ def calc_cpm(x):
 
 def get_nr(fastq_file, sample=0, verbose=False):
     with openfile(fastq_file, "rt") as handle:
-        parser = SeqIO.parse(handle, "fastq", DNAAlphabet())
+        parser = SeqIO.parse(handle, "fastq")
         nonunique = pd.Series([str(rec.seq) for rec in parser if "N" not in rec.seq])
         if sample > 0 and sample < nonunique.shape[0]:
             nonunique = nonunique.sample(n=sample, replace=False)
