@@ -64,6 +64,6 @@ Arguments:
 
 ## Citing and authors
 
-This script will probably be used in some article. I'll provide a DOI, should it get published.
+This script was used for generating motifs for HOCOMOCO 12 database. The link to the article will appear here as soon as it gets published.
 
 The algorithm was initially proposed by Philipp Bucher, and the further modifications and changes were proposed by Ivan Kulakovskii and Arsenii Zinkevich. The final script was written by Arsenii Zinkevich.
