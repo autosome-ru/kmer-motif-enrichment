@@ -64,6 +64,6 @@ Arguments:
 
 ## Citing and authors
 
-This script was used for generating motifs for HOCOMOCO 12 database. The link to the article will appear here as soon as it gets published.
+This script was used for motif analysis of HT-SELEX data for [HOCOMOCO 12](https://hocomoco12.autosome.org) database. The link to the article will appear here as soon as it gets published.
 
 The algorithm was initially proposed by Philipp Bucher, and the further modifications and changes were proposed by Ivan Kulakovskii and Arsenii Zinkevich. The final script was written by Arsenii Zinkevich.
