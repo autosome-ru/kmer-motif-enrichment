@@ -64,6 +64,14 @@ Arguments:
 
 ## Citing and authors
 
-This script was used for motif analysis of HT-SELEX data for [HOCOMOCO 12](https://hocomoco12.autosome.org) database. The link to the article will appear here as soon as it gets published.
+This script was used for motif analysis of HT-SELEX data for [HOCOMOCO 12](https://hocomoco12.autosome.org) database. Please cite:
+
+>**HOCOMOCO in 2024: a rebuild of the curated collection of binding models for human and mouse transcription factors**
+>
+>Ilya E Vorontsov, Irina A Eliseeva, Arsenii Zinkevich, Mikhail Nikonov, Sergey Abramov, Alexandr Boytsov, Vasily Kamenets, Alexandra Kasianova, Semyon Kolmykov, Ivan S Yevshin, Alexander Favorov, Yulia A Medvedeva, Arttu Jolma, Fedor Kolpakov, Vsevolod J Makeev, Ivan V Kulakovskiy
+>
+>Nucleic Acids Research, Volume 52, Issue D1, 5 January 2024, Pages D154–D163
+>
+>doi: [10.1093/nar/gkad1077](https://doi.org/10.1093/nar/gkad1077)
 
 The algorithm was initially proposed by Philipp Bucher, and the further modifications and changes were proposed by Ivan Kulakovskii and Arsenii Zinkevich. The final script was written by Arsenii Zinkevich.
